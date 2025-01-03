@@ -19,6 +19,6 @@ This project is compatible with the following:
 
 ### Clone the Repository
 ```bash
-git clone https://github.com/<your-github-username>/posture-analysis-system.git
-cd posture-analysis-system
+git clone https://github.com/shahroz8899/Posture_analysis_and_alert_system.git
+cd Posture_analysis_and_alert_system
 
