@@ -1,0 +1,5 @@
+opencv-python
+mediapipe
+adafruit-blinka
+adafruit-circuitpython-drv2605
+
