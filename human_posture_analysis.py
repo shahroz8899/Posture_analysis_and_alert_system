@@ -79,8 +79,22 @@ pose = mp_pose.Pose()
 # ===============================================================================================#
 
 if __name__ == "__main__":
+    import cv2
+    import mediapipe as mp
+
+    # Initialize MediaPipe Pose and drawing utilities.
+    mp_pose = mp.solutions.pose
+    pose = mp_pose.Pose()
+    mp_drawing = mp.solutions.drawing_utils
+
     # Initialize webcam (0 for default webcam).
     cap = cv2.VideoCapture(0)
+
+    # Set the desired width and height for the video capture.
+    desired_width = 1900  # Example: Set to 1280 pixels
+    desired_height = 1080  # Example: Set to 720 pixels
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, desired_width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, desired_height)
 
     # Meta information.
     fps = int(cap.get(cv2.CAP_PROP_FPS))
@@ -88,50 +102,71 @@ if __name__ == "__main__":
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     frame_size = (width, height)
 
+    # Initialize counters.
+    good_frames = 0
+    bad_frames = 0
+
     while cap.isOpened():
         # Capture frames.
         success, image = cap.read()
         if not success:
-            print("Please connect camera")
+            print("Please connect the camera.")
             break
 
         # Get height and width of the frame.
         h, w = image.shape[:2]
 
         # Convert the BGR image to RGB.
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         # Process the image with MediaPipe Pose.
-        keypoints = pose.process(image)
+        keypoints = pose.process(image_rgb)
 
-        # Convert back to BGR.
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        # Check if landmarks are detected.
+        if keypoints.pose_landmarks is None:
+            # No landmarks detected, skip processing for this frame.
+            cv2.putText(image, "No landmarks detected", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.imshow('MediaPipe Pose', image)
+            if cv2.waitKey(5) & 0xFF == ord('q'):
+                break
+            continue
 
+        # Get landmark coordinates.
         lm = keypoints.pose_landmarks
         lmPose = mp_pose.PoseLandmark
 
-        # Get landmark coordinates.
-        l_shldr_x = int(lm.landmark[lmPose.LEFT_SHOULDER].x * w)
-        l_shldr_y = int(lm.landmark[lmPose.LEFT_SHOULDER].y * h)
-        r_shldr_x = int(lm.landmark[lmPose.RIGHT_SHOULDER].x * w)
-        r_shldr_y = int(lm.landmark[lmPose.RIGHT_SHOULDER].y * h)
-        l_ear_x = int(lm.landmark[lmPose.LEFT_EAR].x * w)
-        l_ear_y = int(lm.landmark[lmPose.LEFT_EAR].y * h)
-        l_hip_x = int(lm.landmark[lmPose.LEFT_HIP].x * w)
-        l_hip_y = int(lm.landmark[lmPose.LEFT_HIP].y * h)
+        # Safely access landmarks.
+        try:
+            l_shldr_x = int(lm.landmark[lmPose.LEFT_SHOULDER].x * w)
+            l_shldr_y = int(lm.landmark[lmPose.LEFT_SHOULDER].y * h)
+            r_shldr_x = int(lm.landmark[lmPose.RIGHT_SHOULDER].x * w)
+            r_shldr_y = int(lm.landmark[lmPose.RIGHT_SHOULDER].y * h)
+            l_ear_x = int(lm.landmark[lmPose.LEFT_EAR].x * w)
+            l_ear_y = int(lm.landmark[lmPose.LEFT_EAR].y * h)
+            l_hip_x = int(lm.landmark[lmPose.LEFT_HIP].x * w)
+            l_hip_y = int(lm.landmark[lmPose.LEFT_HIP].y * h)
+        except AttributeError:
+            # Skip if any critical landmark is missing.
+            cv2.putText(image, "Missing critical landmarks", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+            cv2.imshow('MediaPipe Pose', image)
+            if cv2.waitKey(5) & 0xFF == ord('q'):
+                break
+            continue
 
         # Calculate distance between left and right shoulder.
         offset = findDistance(l_shldr_x, l_shldr_y, r_shldr_x, r_shldr_y)
 
         # Check camera alignment.
         if offset < 100:
-            cv2.putText(image, str(int(offset)) + ' Aligned', (w - 150, 30), font, 0.9, green, 2)
+            cv2.putText(image, str(int(offset)) + ' Aligned', (w - 150, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
         else:
-            cv2.putText(image, str(int(offset)) + ' Not Aligned', (w - 150, 30), font, 0.9, red, 2)
+            cv2.putText(image, str(int(offset)) + ' Not Aligned', (w - 150, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
 
         # Calculate angles for neck and torso inclinations.
         neck_inclination = findAngle(l_shldr_x, l_shldr_y, l_ear_x, l_ear_y)
         torso_inclination = findAngle(l_hip_x, l_hip_y, l_shldr_x, l_shldr_y)
+
+        # Posture analysis logic here...
 
         # Draw landmarks.
         cv2.circle(image, (l_shldr_x, l_shldr_y), 7, yellow, -1)
@@ -143,7 +178,7 @@ if __name__ == "__main__":
 
         # Display angle and determine posture.
         angle_text_string = 'Neck : ' + str(int(neck_inclination)) + '  Torso : ' + str(int(torso_inclination))
-        if 35 < neck_inclination < 50 and torso_inclination < 10:
+        if 20 < neck_inclination < 50 and torso_inclination < 20:
 
             bad_frames = 0
             good_frames += 1
@@ -181,8 +216,6 @@ if __name__ == "__main__":
         if bad_time > 5:
             testing(1)
 
-
-
         # Display the frame.
         cv2.imshow('MediaPipe Pose', image)
 
@@ -190,5 +223,7 @@ if __name__ == "__main__":
         if cv2.waitKey(5) & 0xFF == ord('q'):
             break
 
+    # Release resources.
     cap.release()
     cv2.destroyAllWindows()
+
