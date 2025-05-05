@@ -5,6 +5,8 @@ import mediapipe as mp
 import board
 import busio
 import adafruit_drv2605
+import numpy as np
+import pyautogui
 
 # Initialize I2C using default Jetson Orin pins (Pin 3 for SDA, Pin 5 for SCL)
 i2c = busio.I2C(board.SCL, board.SDA)
@@ -57,21 +59,40 @@ mp_pose = mp.solutions.pose
 pose = mp_pose.Pose()
 mp_drawing = mp.solutions.drawing_utils
 
-cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1000)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 500)
-fps = int(cap.get(cv2.CAP_PROP_FPS))
-width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+def get_camera():
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1000)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 500)
+    return cap
+
+cap = get_camera()
+cv2.namedWindow("MediaPipe Pose", cv2.WND_PROP_FULLSCREEN)
+cv2.setWindowProperty("MediaPipe Pose", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
 bad_frames = 0
 good_frames = 0
 
-while cap.isOpened():
+screen_width, screen_height = pyautogui.size()
+
+while True:
     success, image = cap.read()
-    if not success:
-        print("Please connect the camera.")
-        break
+
+    if not success or image is None:
+        cap.release()
+        while True:
+            cap = get_camera()
+            success, image = cap.read()
+            if success and image is not None:
+                break
+            blank_img = 255 * np.ones((screen_height, screen_width, 3), dtype=np.uint8)
+            cv2.putText(blank_img, "Camera not connected", (200, 240), font, 1, colors["red"], 2)
+            cv2.imshow("MediaPipe Pose", blank_img)
+            if cv2.waitKey(1000) & 0xFF == ord('q'):
+                cv2.destroyAllWindows()
+                exit()
+        continue
+
+    image = cv2.resize(image, (screen_width, screen_height))
 
     h, w = image.shape[:2]
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -87,17 +108,11 @@ while cap.isOpened():
     lm = keypoints.pose_landmarks
     lmPose = mp_pose.PoseLandmark
 
-    # Enhanced check: ensure full body is visible with good confidence and sufficient landmark count
-    required_landmarks = [lmPose.LEFT_SHOULDER, lmPose.RIGHT_SHOULDER, lmPose.LEFT_HIP, lmPose.RIGHT_HIP, lmPose.LEFT_EAR, lmPose.NOSE, lmPose.LEFT_KNEE]
-    is_valid = True
-    for lm_id in required_landmarks:
-        if lm.landmark[lm_id].visibility < 0.01:
-            is_valid = False
-            break
+    required_landmarks = [lmPose.LEFT_SHOULDER, lmPose.RIGHT_SHOULDER, lmPose.LEFT_HIP, lmPose.RIGHT_HIP, lmPose.LEFT_EAR, lmPose.NOSE]
+    is_valid = all(lm.landmark[lm_id].visibility > 0.2 for lm_id in required_landmarks)
 
-    # Additional: reject frames with fewer than 15 visible landmarks
-    visible_landmarks = [l for l in lm.landmark if l.visibility >= 0.9]
-    if len(visible_landmarks) < 20:
+    visible_landmarks = [l for l in lm.landmark if l.visibility >= 0.98]
+    if len(visible_landmarks) < 15:
         is_valid = False
 
     if not is_valid:
@@ -123,7 +138,6 @@ while cap.isOpened():
     except:
         continue
 
-    # Calculate hip-knee angle
     hip_knee_angle = findAngle(l_hip_x, l_hip_y, l_knee_x, l_knee_y)
     cv2.putText(image, f"Hip-Knee: {hip_knee_angle}°", (l_hip_x + 10, l_hip_y), font, 0.5, colors["green"], 2)
     if 170 <= hip_knee_angle <= 190:
@@ -161,8 +175,8 @@ while cap.isOpened():
     cv2.line(image, (l_hip_x, l_hip_y), (l_shldr_x, l_shldr_y), color, 4)
     cv2.line(image, (l_hip_x, l_hip_y), (l_hip_x, l_hip_y - 100), color, 4)
 
-    good_time = (1 / fps) * good_frames
-    bad_time = (1 / fps) * bad_frames
+    good_time = (1 / 30.0) * good_frames
+    bad_time = (1 / 30.0) * bad_frames
 
     if good_time > 0:
         cv2.putText(image, f'Good Posture Time: {round(good_time, 1)}s', (10, h - 20), font, 0.9, colors["green"], 2)
@@ -178,4 +192,3 @@ while cap.isOpened():
 
 cap.release()
 cv2.destroyAllWindows()
-
