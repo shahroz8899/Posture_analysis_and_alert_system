@@ -19,17 +19,14 @@ except Exception as e:
     print(f"Failed to initialize DRV2605L: {e}")
     exit()
 
-# Play vibration effect
 def testing(trigger):
     if trigger == 1:
         drv.sequence[0] = adafruit_drv2605.Effect(1)
         drv.play()
 
-# Calculate distance
 def findDistance(x1, y1, x2, y2):
     return m.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
-# Calculate angle
 def findAngle(x1, y1, x2, y2):
     try:
         a = [x1, y1]
@@ -55,9 +52,10 @@ colors = {
     "pink": (255, 0, 255)
 }
 
-mp_pose = mp.solutions.pose
-pose = mp_pose.Pose()
+mp_holistic = mp.solutions.holistic
+holistic = mp_holistic.Holistic(static_image_mode=False, model_complexity=1)
 mp_drawing = mp.solutions.drawing_utils
+mp_drawing_styles = mp.solutions.drawing_styles
 
 def get_camera():
     cap = cv2.VideoCapture(0)
@@ -71,12 +69,10 @@ cv2.setWindowProperty("MediaPipe Pose", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULL
 
 bad_frames = 0
 good_frames = 0
-
 screen_width, screen_height = pyautogui.size()
 
 while True:
     success, image = cap.read()
-
     if not success or image is None:
         cap.release()
         while True:
@@ -93,26 +89,23 @@ while True:
         continue
 
     image = cv2.resize(image, (screen_width, screen_height))
-
     h, w = image.shape[:2]
     image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    keypoints = pose.process(image_rgb)
+    results = holistic.process(image_rgb)
 
-    if not keypoints.pose_landmarks:
-        cv2.putText(image, "No landmarks detected", (10, 30), font, 1, colors["red"], 2)
-        cv2.imshow('MediaPipe Pose', image)
-        if cv2.waitKey(5) & 0xFF == ord('q'):
-            break
-        continue
+    lm = results.pose_landmarks
+    face_lm = results.face_landmarks
 
-    lm = keypoints.pose_landmarks
-    lmPose = mp_pose.PoseLandmark
+    is_valid = True
+    visible_landmarks = []
 
-    required_landmarks = [lmPose.LEFT_SHOULDER, lmPose.RIGHT_SHOULDER, lmPose.LEFT_HIP, lmPose.RIGHT_HIP, lmPose.LEFT_EAR, lmPose.NOSE]
-    is_valid = all(lm.landmark[lm_id].visibility > 0.2 for lm_id in required_landmarks)
+    if lm:
+        visible_landmarks += [l for l in lm.landmark if l.visibility >= 0.9]
 
-    visible_landmarks = [l for l in lm.landmark if l.visibility >= 0.98]
-    if len(visible_landmarks) < 15:
+    if face_lm:
+        visible_landmarks += face_lm.landmark[:3]  # Assume first 20 face landmarks are enough to count
+
+    if len(visible_landmarks) < 17:
         is_valid = False
 
     if not is_valid:
@@ -122,19 +115,19 @@ while True:
             break
         continue
 
-    mp_drawing.draw_landmarks(image, lm, mp_pose.POSE_CONNECTIONS)
+    mp_drawing.draw_landmarks(image, lm, mp_holistic.POSE_CONNECTIONS)
 
     try:
-        l_shldr_x = int(lm.landmark[lmPose.LEFT_SHOULDER].x * w)
-        l_shldr_y = int(lm.landmark[lmPose.LEFT_SHOULDER].y * h)
-        r_shldr_x = int(lm.landmark[lmPose.RIGHT_SHOULDER].x * w)
-        r_shldr_y = int(lm.landmark[lmPose.RIGHT_SHOULDER].y * h)
-        l_ear_x = int(lm.landmark[lmPose.LEFT_EAR].x * w)
-        l_ear_y = int(lm.landmark[lmPose.LEFT_EAR].y * h)
-        l_hip_x = int(lm.landmark[lmPose.LEFT_HIP].x * w)
-        l_hip_y = int(lm.landmark[lmPose.LEFT_HIP].y * h)
-        l_knee_x = int(lm.landmark[lmPose.LEFT_KNEE].x * w)
-        l_knee_y = int(lm.landmark[lmPose.LEFT_KNEE].y * h)
+        l_shldr_x = int(lm.landmark[mp_holistic.PoseLandmark.LEFT_SHOULDER].x * w)
+        l_shldr_y = int(lm.landmark[mp_holistic.PoseLandmark.LEFT_SHOULDER].y * h)
+        r_shldr_x = int(lm.landmark[mp_holistic.PoseLandmark.RIGHT_SHOULDER].x * w)
+        r_shldr_y = int(lm.landmark[mp_holistic.PoseLandmark.RIGHT_SHOULDER].y * h)
+        l_ear_x = int(lm.landmark[mp_holistic.PoseLandmark.LEFT_EAR].x * w)
+        l_ear_y = int(lm.landmark[mp_holistic.PoseLandmark.LEFT_EAR].y * h)
+        l_hip_x = int(lm.landmark[mp_holistic.PoseLandmark.LEFT_HIP].x * w)
+        l_hip_y = int(lm.landmark[mp_holistic.PoseLandmark.LEFT_HIP].y * h)
+        l_knee_x = int(lm.landmark[mp_holistic.PoseLandmark.LEFT_KNEE].x * w)
+        l_knee_y = int(lm.landmark[mp_holistic.PoseLandmark.LEFT_KNEE].y * h)
     except:
         continue
 
@@ -155,7 +148,6 @@ while True:
 
     neck_inclination = findAngle(l_shldr_x, l_shldr_y, l_ear_x, l_ear_y)
     body_inclination = findAngle(l_hip_x, l_hip_y, l_shldr_x, l_shldr_y)
-
     angle_text = f'Neck: {neck_inclination}°  Body: {body_inclination}°'
 
     if 10 < neck_inclination < 50 and body_inclination < 20:
@@ -186,9 +178,20 @@ while True:
     if bad_time > 5:
         testing(1)
 
+    if face_lm:
+        mp_drawing.draw_landmarks(
+            image,
+            face_lm,
+            mp_holistic.FACEMESH_TESSELATION,
+            landmark_drawing_spec=None,
+            connection_drawing_spec=mp_drawing_styles
+                .get_default_face_mesh_tesselation_style()
+        )
+
     cv2.imshow('MediaPipe Pose', image)
     if cv2.waitKey(5) & 0xFF == ord('q'):
         break
 
 cap.release()
 cv2.destroyAllWindows()
+
